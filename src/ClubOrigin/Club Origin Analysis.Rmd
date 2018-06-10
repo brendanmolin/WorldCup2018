@@ -1,0 +1,24 @@
+---
+title: "Club Origin"
+author: "Brendan Molin"
+date: "June 10, 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+### Pre-processing
+
+```{r import_squads}
+squads <- read.csv("../raw_data/2018 FIFA World Cup Squads.csv")
+```
+
+```{r import_players}
+players <- read.csv("../raw_data/CompleteDataset.csv")
+```
+
+### Visualization
