@@ -9,16 +9,127 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+```{r environment}
+library(dplyr)
+library(igraph)
+library(ggplot2)
+library(countrycode)
+```
 
+It's common knowledge amongst association football fans that the World Cup, while being the highest profile event in the world, isn't necessarily a display of the best football play in the world. For one, national teams have a more limited pool of talent to choose players from as compared to the top professional clubs in the world, as national teams can only pick players who identify as being with that nation, while clubs, with the right amount of money, compete for talent all over the world.  These clubs tend to all be in the European leagues, specifically in Great Britain, France, Germany, Spain, and Italy.
+
+It stands to reason that we can get a sense of how good a national team is by seeing how many players come from those leagues.  I'm not an intense football fan, so I couldn't tell you exactly how reputable each club is, outside of the most famous ones.  I might believe, however, that the clubs from which the most players are being selected onto the national teams are also the clubs of the highest quality.
+
+On this premise, we'll do some exploratory analysis of the national teams to see which clubs are being represented and then device a metric to rank the teams based on those relationships.
 
 ### Pre-processing
 
+We import data on the 2018 World Cup national teams from the dataset hosted on Kaggle. <https://www.kaggle.com/cclayford/2018-fifa-world-cup-squads>
+
 ```{r import_squads}
-squads <- read.csv("../raw_data/2018 FIFA World Cup Squads.csv")
+squads <- read.csv("../../raw_data/2018 FIFA World Cup Squads.csv", stringsAsFactors = FALSE)
+colnames(squads)[1] <- "I..Team"
 ```
 
-```{r import_players}
-players <- read.csv("../raw_data/CompleteDataset.csv")
+We also bring in some geographic data so we can later visualize which region of the world each country is.
+
+```{r import_country}
+countries <- countrycode::codelist %>% select(cldr.name.en, continent)
+```
+
+```{r match_countries}
+squad_countries <- squads %>%
+  select(I..Team) %>%
+  unique %>%
+  left_join(countries, by = c("I..Team" = "cldr.name.en")) %>%
+  mutate(continent = ifelse(I..Team == 'England', 'Europe', continent))
+
+club_countries <- data.frame(I..Team = unique(squads$Club), continent = 'None')
+
+squad_countries <- rbind(squad_countries, club_countries)
+
+continent_colors <- data.frame(continent = c("Asia", "Europe", "Africa", "Oceania", "Americas", "None"),
+                               color = c("Dark Orange", "Purple", "darkgreen", "Blue", "Red", "White"),
+                               v_order = 1:6,
+                               stringsAsFactors = FALSE)
+
+squad_countries <- squad_countries %>%
+  left_join(continent_colors) %>%
+  arrange(desc(v_order))
+```
+
+We don't intend to do any player analysis, just clubs and teams.  Therefore we aggregate our data up to show counts of players grouped by their national and club teams.
+
+```{r squad_club_agg}
+squad_club <- squads %>%
+  group_by(I..Team, Club) %>%
+  summarise(weight = n())
 ```
 
 ### Visualization
+
+We now have a full dataset of relational information - which clubs 'sent' players to the national teams.  To get an idea of how this tangle of relationships looks, we plot out these relationships in a network chart.
+
+```{r to_igraph}
+g <- graph_from_data_frame(d = squad_club, directed = TRUE, vertices = squad_countries)
+```
+
+```{r edge_params}
+E(g)$arrow.size = 0
+E(g)$width = E(g)$weight
+```
+
+```{r node_params}
+V(g)$size = ifelse(V(g)$color == "White", 1, 0)
+V(g)$label.cex = 1.2
+V(g)$label.color = V(g)$color
+V(g)$label = ifelse(V(g)$color == "White", NA, V(g)$name)
+```
+
+```{r plot, fig.height=12, fig.width=12}
+set.seed = 13
+plot.igraph(g, layout=layout.fruchterman.reingold(g, niter=1000000))
+```
+
+We can learn a lot from this chart.  For one, the European nations all tend to draw from the same clubs.  Iceland in this regard is an outlier, as is Russia and, to a lesser extent, Sweden.  We also learn that several South American countries draw from these clubs - Brazil, Columbia, and Argentia primarily.  If we accept our hypothesis that the top talent is concentrated in a select set of clubs, those clubs at the center of this visualization should represent the top clubs, and the countries near the center will be the top countries.  This certainly plays out with our general knowledge of the World Cup, where a few European teams, Brazil, and Argentina have historically had major success.  Out on the fringes, we have South Korea, Iceland, Peru, Panama, and Iran - their players are mostly coming from domestic leagues.
+
+
+
+```{r ic_teammates}
+squad_club %>%
+  mutate(weight = ifelse(weight == 1, 0, weight)) %>%
+  arrange(desc(weight)) %>%
+  group_by(I..Team) %>%
+  mutate(total_teammates = sum(weight),
+         club_n = as.character(row_number())) %>%
+  ggplot(aes(x = reorder(I..Team, total_teammates), y = weight, fill = club_n)) +
+  geom_bar(stat = 'identity', position = 'stack') +
+  coord_flip() +
+  theme(legend.position = 'none') +
+  labs(subtitle = 'Number of players sharing international and club squads', x = 'Players', y = 'International Squad')
+```
+
+```{r club_rep, fig.height = 10}
+squad_club %>%
+  group_by(Club) %>%
+  summarize(player_representation = sum(weight),
+            country_representation = n_distinct(I..Team)) %>%
+  ggplot(aes(x = player_representation, y = country_representation)) +
+  geom_point() +
+  theme(legend.position = 'none') +
+  labs(title = 'Number of players from club squads', subtitle = 'Minimum 4 players', x = 'Players', y = 'Club Squad')
+```
+
+```{r squad_club_rep, fig.height = 10}
+squad_club %>%
+  group_by(I..Team, Club) %>%
+  summarize(representation = sum(weight)) %>%
+  filter(representation > 1) %>%
+  ggplot(aes(x = reorder(Club, representation), y = representation)) +
+  geom_bar(stat = 'identity', position = 'stack') +
+  facet_wrap(~I..Team, scales = 'free_y') +
+  coord_flip() +
+  scale_y_continuous(breaks = seq(0, 10, 2)) +
+  theme(legend.position = 'none') +
+  labs(title = 'Number of players from club squads by international squad', subtitle = 'Minimum 2 players', x = 'Players', y = 'Club Squad')
+```
